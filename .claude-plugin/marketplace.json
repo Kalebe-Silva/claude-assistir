@@ -1,0 +1,11 @@
+{
+  "name": "tecadi-ti",
+  "owner": { "name": "TI Tecadi" },
+  "plugins": [
+    {
+      "name": "assistir",
+      "source": "./plugin",
+      "description": "Faz o Claude assistir a vídeos (YouTube ou arquivo local): quadros + fala, tudo processado no próprio PC."
+    }
+  ]
+}

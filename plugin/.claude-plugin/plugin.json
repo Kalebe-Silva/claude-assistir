@@ -1,0 +1,6 @@
+{
+  "name": "assistir",
+  "version": "1.0.0",
+  "description": "Faz o Claude assistir a vídeos (YouTube ou arquivo local): baixa, tira quadros sem repetição e transcreve a fala localmente.",
+  "author": { "name": "TI Tecadi" }
+}

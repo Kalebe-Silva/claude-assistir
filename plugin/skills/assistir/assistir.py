@@ -5,7 +5,9 @@ Baixa o vídeo (YouTube e outros sites suportados pelo yt-dlp) ou usa um arquivo
 tira quadros sem repetição, pega a legenda ou transcreve o áudio localmente (faster-whisper)
 e grava um roteiro.md que junta quadros e falas na linha do tempo.
 
-Tudo roda no servidor: nada de áudio ou vídeo é enviado para serviços de IA externos.
+Tudo roda na máquina de quem usa: nada de áudio ou vídeo vai para serviços de IA externos.
+Na primeira vez, instala em ~/.assistir (pip --target) o yt-dlp,
+faster-whisper, ffmpeg (imageio-ffmpeg) e deno (exigido pelo YouTube).
 
 Uso:
   assistir <url|arquivo> [--inicio mm:ss] [--fim mm:ss] [--quadros 40]
@@ -14,15 +16,80 @@ Uso:
 import argparse, datetime, json, os, re, shutil, subprocess, sys, tempfile, unicodedata
 from pathlib import Path
 
+for _s in (sys.stdout, sys.stderr):  # console do Windows não é UTF-8 por padrão
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HOME = Path.home()
-VENDOR_YTDLP = Path(os.environ.get("ASSISTIR_YTDLP", HOME / ".local/opt/ytdlp"))
-VENDOR_WHISPER = Path(os.environ.get("ASSISTIR_WHISPER", HOME / ".local/opt/whisper"))
-FFMPEG = os.environ.get("ASSISTIR_FFMPEG") or shutil.which("ffmpeg") or str(
-    HOME / ".local/opt/pyvideo/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2")
-BUN = os.environ.get("ASSISTIR_BUN") or shutil.which("bun") or str(HOME / ".bun/bin/bun")
-SAIDA_PADRAO = Path(os.environ.get("ASSISTIR_SAIDA", HOME / "Analises Claude/videos-assistidos"))
+# instalações "vendoradas" do servidor da Tecadi; em outras máquinas não existem e são ignoradas
+for _v in (os.environ.get("ASSISTIR_WHISPER", HOME / ".local/opt/whisper"),
+           os.environ.get("ASSISTIR_YTDLP", HOME / ".local/opt/ytdlp")):
+    if Path(_v).is_dir():
+        sys.path.insert(0, str(_v))
+PACOTES = ["yt-dlp[default]", "faster-whisper", "imageio-ffmpeg", "deno"]
+LIBS = Path(os.environ.get("ASSISTIR_LIBS", HOME / ".assistir" / f"libs-py{sys.version_info[0]}{sys.version_info[1]}"))
+_videos = HOME / "Videos"
+SAIDA_PADRAO = Path(os.environ.get("ASSISTIR_SAIDA") or ((_videos if _videos.is_dir() else HOME) / "assistidos"))
 LARGURA = 768  # largura dos quadros: legível para o Claude e barato em tokens
-sys.path[:0] = [str(Path(os.environ.get("ASSISTIR_WHISPER", Path.home() / ".local/opt/whisper"))), str(Path(os.environ.get("ASSISTIR_YTDLP", Path.home() / ".local/opt/ytdlp")))]
+
+
+def garantir_dependencias():
+    """Usa o que já está instalado; se faltar algo, instala uma vez em ~/.assistir (pip --target)."""
+    if LIBS.is_dir():
+        sys.path.insert(0, str(LIBS))
+    try:
+        import yt_dlp, faster_whisper, numpy  # noqa: F401
+        return
+    except ImportError:
+        pass
+    pip = [sys.executable, os.environ["ASSISTIR_PIP"]] if os.environ.get("ASSISTIR_PIP") else [sys.executable, "-m", "pip"]
+    log(f"primeira execução: instalando dependências em {LIBS} (alguns minutos, ~800 MB)...")
+    LIBS.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run([*pip, "install", "-q", "--disable-pip-version-check", "--upgrade", "--target", str(LIBS), *PACOTES])
+    if r.returncode:
+        raise SystemExit("[assistir] não consegui instalar as dependências com o pip. "
+                         "Confira se o Python 3.10+ está instalado com o pip (python -m pip --version).")
+    import importlib
+    importlib.invalidate_caches()
+    if str(LIBS) not in sys.path:
+        sys.path.insert(0, str(LIBS))
+    import yt_dlp, faster_whisper, numpy  # noqa: F401
+
+
+def achar_ffmpeg():
+    if os.environ.get("ASSISTIR_FFMPEG"):
+        return os.environ["ASSISTIR_FFMPEG"]
+    if shutil.which("ffmpeg"):
+        return shutil.which("ffmpeg")
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    fixo = HOME / ".local/opt/pyvideo/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2"
+    if fixo.exists():
+        return str(fixo)
+    raise SystemExit("[assistir] ffmpeg não encontrado.")
+
+
+def achar_js():
+    """Runtime JavaScript que o yt-dlp usa para o YouTube: deno, bun ou node."""
+    for nome in ("deno", "bun", "node"):
+        caminho = os.environ.get(f"ASSISTIR_{nome.upper()}") or shutil.which(nome)
+        if not caminho and nome == "bun" and (HOME / ".bun/bin/bun").exists():
+            caminho = str(HOME / ".bun/bin/bun")
+        if caminho:
+            return {nome: {"path": caminho}}
+    try:
+        import deno
+        return {"deno": {"path": deno.find_deno_bin()}}
+    except Exception:
+        return None
+
+
+FFMPEG = None  # definido em main(), depois de garantir as dependências
 
 
 def log(msg):
@@ -62,10 +129,11 @@ def duracao(arq):
 
 # ---------------------------------------------------------------- download
 def baixar(url, pasta, idioma, com_legenda):
-    sys.path.insert(0, str(VENDOR_YTDLP))
     import yt_dlp
 
-    langs = [f"{idioma}.*", idioma] if idioma else ["pt.*", "pt", "en.*", "en"]
+    # legenda manual no idioma pedido ou a automática no idioma original (-orig);
+    # evita "pt-en" e afins, que são traduções automáticas ruins
+    langs = [idioma, f"{idioma}-BR", f"{idioma}-orig"] if idioma else ["pt", "pt-BR", "en", ".*-orig"]
     opts = {
         "outtmpl": str(pasta / "video.%(ext)s"),
         "format": "bv*[height<=720]+ba/b[height<=720]/b",
@@ -76,8 +144,9 @@ def baixar(url, pasta, idioma, com_legenda):
         "writesubtitles": com_legenda, "writeautomaticsub": com_legenda,
         "subtitleslangs": langs, "subtitlesformat": "vtt",
     }
-    if Path(BUN).exists():
-        opts["js_runtimes"] = {"bun": {"path": BUN}}
+    js = achar_js()
+    if js:
+        opts["js_runtimes"] = js
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=True)
@@ -129,7 +198,6 @@ def ler_vtt(arq):
 
 
 def transcrever(video, idioma, modelo, ini, fim, dica=None):
-    sys.path.insert(0, str(VENDOR_WHISPER))
     import numpy as np
     from faster_whisper import WhisperModel
 
@@ -228,6 +296,9 @@ def roteiro(pasta, meta, falas, qs, fonte_fala, ini, fim):
 
 
 def main():
+    global FFMPEG
+    garantir_dependencias()
+    FFMPEG = achar_ffmpeg()
     ap = argparse.ArgumentParser(description="Prepara um vídeo para o Claude assistir (quadros + fala).")
     ap.add_argument("fonte", help="URL do vídeo ou caminho de um arquivo local")
     ap.add_argument("--inicio"), ap.add_argument("--fim")

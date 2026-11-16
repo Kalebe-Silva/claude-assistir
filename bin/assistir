@@ -1,4 +1,4 @@
 #!/bin/sh
 # Atalho: assistir <url|arquivo> [opções]  (veja assistir --help)
-export HF_HUB_DISABLE_TELEMETRY=1 ORT_LOGGING_LEVEL=3
-exec python3 "$(dirname "$(readlink -f "$0")")/../assistir.py" "$@"
+export HF_HUB_DISABLE_TELEMETRY=1 ORT_LOGGING_LEVEL=3 ASSISTIR_SAIDA="${ASSISTIR_SAIDA:-$HOME/Analises Claude/videos-assistidos}"
+exec python3 "$(dirname "$(readlink -f "$0")")/../plugin/skills/assistir/assistir.py" "$@"
