@@ -12,6 +12,7 @@ faster-whisper, ffmpeg (imageio-ffmpeg) e deno (exigido pelo YouTube).
 Uso:
   assistir <url|arquivo> [--inicio mm:ss] [--fim mm:ss] [--quadros 40]
            [--modelo small|medium] [--idioma pt] [--sem-legenda] [--manter-video] [--saida DIR]
+           [--navegador firefox|edge|chrome[:perfil]] [--cookies cookies.txt]
 """
 import argparse, datetime, json, os, re, shutil, subprocess, sys, tempfile, unicodedata
 from pathlib import Path
@@ -128,7 +129,7 @@ def duracao(arq):
 
 
 # ---------------------------------------------------------------- download
-def baixar(url, pasta, idioma, com_legenda):
+def baixar(url, pasta, idioma, com_legenda, navegador=None, cookies=None):
     import yt_dlp
 
     # legenda manual no idioma pedido ou a automática no idioma original (-orig);
@@ -147,17 +148,37 @@ def baixar(url, pasta, idioma, com_legenda):
     js = achar_js()
     if js:
         opts["js_runtimes"] = js
+    if navegador:
+        # "firefox", "edge", "chrome" ou "firefox:NomeDoPerfil": usa a sessão já aberta no navegador
+        nome, _, perfil = navegador.partition(":")
+        opts["cookiesfrombrowser"] = (nome.lower(), perfil or None, None, None)
+    if cookies:
+        opts["cookiefile"] = str(Path(cookies).expanduser())
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as e:
-        if not com_legenda or "subtitle" not in str(e).lower():
+        msg = str(e)
+        if re.search(r"(?i)could not find .*cookies database|unsupported browser", msg):
+            raise SystemExit(f"[assistir] não achei o navegador '{navegador}' neste computador. "
+                             "Use um navegador instalado e com login feito no site (firefox, edge, chrome...).")
+        if re.search(r"(?i)could not (copy|decrypt).*cookie|failed to decrypt|cookie database", msg):
+            raise SystemExit("[assistir] não consegui ler os cookies do navegador. No Windows, o Chrome e o Edge "
+                             "bloqueiam a leitura com o navegador aberto: feche-o por completo e tente de novo, "
+                             "ou use --navegador firefox.")
+        if re.search(r"(?i)log ?in|sign in|cookies|private|authenticat|registered users|not available", msg) \
+                and "subtitle" not in msg.lower():
+            dica = ("Tente de novo com --navegador firefox (ou edge/chrome), logado no site."
+                    if not (navegador or cookies) else
+                    "Confira se a conta logada nesse navegador tem acesso ao vídeo.")
+            raise SystemExit("[assistir] o site pediu login para este vídeo. " + dica)
+        if not com_legenda or "subtitle" not in msg.lower():
             raise
         # o YouTube costuma recusar legenda com 429; segue sem ela e transcreve local
         log("legenda indisponível (" + str(e).split(":")[-1].strip() + "); vou transcrever o áudio")
         for p in pasta.glob("video*"):
             p.unlink()
-        return baixar(url, pasta, idioma, False)
+        return baixar(url, pasta, idioma, False, navegador, cookies)
     video = next(pasta.glob("video.mp4"), None) or next(
         (p for p in pasta.glob("video.*") if p.suffix not in (".vtt",)), None)
     legendas = sorted(pasta.glob("video*.vtt"))
@@ -308,6 +329,9 @@ def main():
     ap.add_argument("--sem-legenda", action="store_true", help="ignora a legenda e transcreve o áudio")
     ap.add_argument("--manter-video", action="store_true", help="não apaga o vídeo baixado")
     ap.add_argument("--saida", help=f"pasta base (padrão {SAIDA_PADRAO})")
+    ap.add_argument("--navegador", help="usa o login do navegador para vídeos que pedem conta: "
+                    "firefox, edge, chrome, brave... (opcional :perfil, ex.: firefox:default-release)")
+    ap.add_argument("--cookies", help="arquivo cookies.txt (formato Netscape) exportado do navegador")
     a = ap.parse_args()
     ini, fim = seg(a.inicio), seg(a.fim)
 
@@ -318,7 +342,7 @@ def main():
             video, leg, meta = local, None, {"title": local.stem, "arquivo": str(local)}
         else:
             log("baixando...")
-            video, leg, meta = baixar(a.fonte, tmp, a.idioma, not a.sem_legenda)
+            video, leg, meta = baixar(a.fonte, tmp, a.idioma, not a.sem_legenda, a.navegador, a.cookies)
             if not video:
                 raise SystemExit("O download não gerou arquivo de vídeo.")
         meta.setdefault("duration", duracao(video))

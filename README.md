@@ -3,6 +3,9 @@
 Faz o Claude "assistir" a um vídeo: baixa (YouTube e outros sites, via yt-dlp) ou usa um arquivo local, tira quadros sem repetição, pega a legenda ou transcreve o áudio localmente (faster-whisper) e grava um `roteiro.md` com quadros e falas na linha do tempo. Nada vai para serviços de IA externos.
 
     assistir <url|arquivo> [--idioma pt] [--inicio mm:ss] [--fim mm:ss] [--quadros 40] [--modelo small|medium]
+             [--navegador firefox|edge|chrome[:perfil]] [--cookies cookies.txt]
+
+Vídeo que pede login (Instagram, LinkedIn Learning, Teams...): `--navegador` usa a sessão já aberta no navegador. No Windows, o Chrome e o Edge precisam estar fechados; o Firefox funciona aberto.
 
 - É um plugin do Claude Code: marketplace `tecadi-ti` (`.claude-plugin/marketplace.json`), plugin em `plugin/`, skill e script em `plugin/skills/assistir/`.
 - No servidor: atalho `bin/assistir` (link em `~/.local/bin`, saída em `~/Analises Claude/videos-assistidos`) e skill linkada em `~/.claude/skills/assistir`.
