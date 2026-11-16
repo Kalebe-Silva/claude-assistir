@@ -10,8 +10,12 @@ Faz o Claude "assistir" a um vídeo: baixa (YouTube e outros sites, via yt-dlp) 
 
 ## Instalar no Claude Code (PC dos colegas)
 
-    /plugin marketplace add <owner>/<repo>
+    /plugin marketplace add Kalebe-Silva/claude-assistir
     /plugin install assistir@tecadi-ti
+
+No Claude Code 2.1.275 ou mais novo, dá para fazer em um passo:
+
+    /plugin install assistir --marketplace Kalebe-Silva/claude-assistir
 
 Depois é só mandar um link de vídeo e pedir o resumo.
 - Dependências no servidor: yt-dlp em `~/.local/opt/ytdlp`, faster-whisper em `~/.local/opt/whisper`, ffmpeg do imageio, bun como runtime JS do YouTube. Caminhos trocáveis por `ASSISTIR_YTDLP`, `ASSISTIR_WHISPER`, `ASSISTIR_FFMPEG`, `ASSISTIR_BUN`, `ASSISTIR_SAIDA`.
